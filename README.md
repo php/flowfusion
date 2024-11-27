@@ -24,20 +24,23 @@ docker exec -it phpfuzz bash
 ```
 
 * inside the docker, clone flowfusion in /home/phpfuzz/WorkSpace
-```
+```bash
 git clone https://github.com/php/flowfusion.git
 ```
 or
-```
+```bash
 git clone git@github.com:php/flowfusion.git
 ```
 then (this takes some minutes)
-```
+```bash
 cd flowfusion; ./prepare.sh
 ```
-and start fuzzing (tmux)
+and start fuzzing on tmux
+```bash
+tmux new-session -s fuzz 'bash'
 ```
-tmux new-session -s fuzz 'bash'; python3 main.py
+```bash
+tmux-shell$ python3 main.py
 ```
 
 * you can use the following command to view bugs:
