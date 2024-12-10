@@ -159,20 +159,21 @@ def reduce_php(testpath, phppath, config, bug_output):
 
 if __name__ == "__main__":
 
-    # Define the path to the test PHP file
+    # Define the path to the test PHP file, you need to move the php to the tmp
+    # best to also copy all dependencies to /tmp for reproduce
     testpath = "/tmp/test.php"
 
-    #
+    # default php path
     phppath = "/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/cli/php"
 
     # Configuration options for the PHP test run
     config = '-d "zend_extension=/home/phpfuzz/WorkSpace/flowfusion/php-src/modules/opcache.so" -d "opcache.enable=1" -d "opcache.enable_cli=1" -d "opcache.jit=1254"'
-    config = '-d "opcache.cache_id=worker26" -d "output_handler=" -d "open_basedir=" -d "disable_functions=" -d "output_buffering=Off" -d "error_reporting=30719" -d "display_errors=1" -d "display_startup_errors=1" -d "log_errors=0" -d "html_errors=0" -d "track_errors=0" -d "report_memleaks=1" -d "report_zend_debug=0" -d "docref_root=" -d "docref_ext=.html" -d "error_prepend_string=" -d "error_append_string=" -d "auto_prepend_file=" -d "auto_append_file=" -d "ignore_repeated_errors=0" -d "precision=14" -d "serialize_precision=-1" -d "memory_limit=128M" -d "opcache.fast_shutdown=0" -d "opcache.file_update_protection=0" -d "opcache.revalidate_freq=0" -d "opcache.jit_hot_loop=1" -d "opcache.jit_hot_func=1" -d "opcache.jit_hot_return=1" -d "opcache.jit_hot_side_exit=1" -d "opcache.jit_max_root_traces=100000" -d "opcache.jit_max_side_traces=100000" -d "opcache.jit_max_exit_counters=100000" -d "opcache.protect_memory=1" -d "zend.assertions=1" -d "zend.exception_ignore_args=0" -d "zend.exception_string_param_max_len=15" -d "short_open_tag=0" -d "extension_dir=/home/phpfuzz/WorkSpace/flowfusion/php-src/modules/" -d "zend_extension=/home/phpfuzz/WorkSpace/flowfusion/php-src/modules/opcache.so" -d "session.auto_start=0" -d "zlib.output_compression=Off" -d "opcache.enable=1" -d "opcache.enable_cli=1" -d "opcache.jit=1235"'
 
     # The expected bug output that we are trying to reproduce
-    bug_output = "heap-use-after-free"
+    # if sanitizers' alerts
     bug_output = 'Sanitizer'
-    bug_output = 'zend_types.h:1382'
-    bug_output = 'spl_array.c:79'
+    # if assertion failure
+    bug_output = 'core dumped'
+
 
     print(reduce_php(testpath, phppath, config, bug_output))

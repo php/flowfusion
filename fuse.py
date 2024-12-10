@@ -50,7 +50,8 @@ class Fusion():
     # Randomly generate a JIT mode configuration for opcache
     def random_jit_mode(self):
         # TODO: shall we fuzz all these jit modes?
-        jit_mode = choice(['1111','1215','1211','1213','1254','1255','1201','1202','1205','1101','1103','1105','1231','1235','1011','1015'])
+        # jit_mode = choice(['1111','1215','1211','1213','1254','1255','1201','1202','1205','1101','1103','1105','1231','1235','1011','1015'])
+        jit_mode = choice(['1254','1205'])
         jit_ini = '''
 opcache.enable=1
 opcache.enable_cli=1
@@ -239,7 +240,7 @@ opcache.jit=''' + jit_mode + '\n'
     def _instrumentation_classfuzz(self, defined_vars):
         _pre_instrument = []
         _after_instrument = []
-    
+
         # Connect to the SQLite database
         conn = sqlite3.connect(f'{self.test_root}/knowledges/class.db')
         cursor = conn.cursor()
@@ -308,8 +309,8 @@ opcache.jit=''' + jit_mode + '\n'
 
     # Fuse two test cases while handling different sections
     def fuse(self):
-        phpcode1, variable1, dataflow1, description1, configuration1, skipif1, extension1, secondary1 = self.select_random_seed(secondary='secondary')
-        phpcode2, variable2, dataflow2, description2, configuration2, skipif2, extension2, secondary2 = self.select_random_seed(secondary='secondary')
+        phpcode1, variable1, dataflow1, description1, configuration1, skipif1, extension1 = self.select_random_seed()
+        phpcode2, variable2, dataflow2, description2, configuration2, skipif2, extension2 = self.select_random_seed()
 
         phpcode1 = self.mut.mutate(phpcode1)
         phpcode2 = self.mut.mutate(phpcode2)
@@ -337,7 +338,9 @@ opcache.jit=''' + jit_mode + '\n'
 
         variables = eval(variable1) + eval(variable2) + ['$fusion']
 
-        _pre_class_instrument, _after_class_instrument = self._instrumentation_classfuzz(variables) 
+        # TODO: to optimize the efficiency
+        # currently disabled for better efficiency
+        _pre_class_instrument, _after_class_instrument = "","" #self._instrumentation_classfuzz(variables)
 
         if self.apifuzz:
             _instrument_apifuzz = self._instrumentation_apifuzz(variables)
@@ -354,31 +357,53 @@ opcache.jit=''' + jit_mode + '\n'
 
         return fused_test
 
-    def select_random_seed(self, secondary):
-        
-        conn = sqlite3.connect(f"{self.test_root}/knowledges/seeds.db")
+    def select_random_seed(self):
+        return choice(self.seeds)
 
+    def load_classes(self):
+        # Connect to the SQLite database
+        conn = sqlite3.connect(f'{self.test_root}/knowledges/class.db')
         cursor = conn.cursor()
 
-        SQL = f"SELECT phpcode, variable, dataflow, description, configuration, skipif, extension, secondary FROM seeds WHERE secondary={secondary} ORDER BY RANDOM() LIMIT 1"
-
-        # Select a random record
+        # Select a random class
+        cursor.execute('SELECT id, class_name FROM classes')
+        # Fetch all records
         cursor.execute(SQL)
-        record = cursor.fetchone()
-
+        records = cursor.fetchall()
         conn.close()
 
-        if record:
-            return record
+        if records:
+            self.classes = records
         else:
-            print("no seed available")
+            print("No seeds available")
+            exit()
+
+    #def load_apis(self):
+
+    def load_seeds(self):
+        conn = sqlite3.connect(f"{self.test_root}/knowledges/seeds.db")
+        cursor = conn.cursor()
+
+        SQL = f"""
+            SELECT phpcode, variable, dataflow, description, configuration, skipif, extension FROM seeds
+            """
+
+        # Fetch all records
+        cursor.execute(SQL)
+        records = cursor.fetchall()
+        conn.close()
+
+        if records:
+            self.seeds = records
+        else:
+            print("No seeds available")
             exit()
 
     # Main function to handle the test fusion process
     def main(self):
+        self.load_seeds()
         while True:
             fused_test = self.fuse()
-            
             self.fuse_count += 1
             self.fuse_count %= 10000
             self.write_file(f"/tmp/fused{self.fuse_count}.phpt", fused_test)
