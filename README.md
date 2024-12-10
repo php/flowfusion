@@ -1,6 +1,6 @@
 ## FlowFusion
 
-FlowFusion is a fully automated fuzzing tool to discover various memory errors (detected by sanitizers) in the PHP interpreter. 
+FlowFusion is a fully automated fuzzing tool that detects various bugs (memory errors, undefined behaviors, assertion failures) in the PHP interpreter. 
 
 The core idea behing FlowFusion is to leverage **dataflow** as an efficient representation of test cases (.phpt files) maintained by PHP developers, merging two (or more) test cases to produce fused test cases with more complex code semantics. We connect two (or more) test cases via interleaving their dataflows, i.e., bring the code context from one test case to another. This enables interactions among existing test cases, which are mostly the unit tests verifying one single functionality, making fused test cases interesting with merging code semantics.
 
@@ -24,20 +24,23 @@ docker exec -it phpfuzz bash
 ```
 
 * inside the docker, clone flowfusion in /home/phpfuzz/WorkSpace
-```
+```bash
 git clone https://github.com/php/flowfusion.git
 ```
 or
-```
+```bash
 git clone git@github.com:php/flowfusion.git
 ```
 then (this takes some minutes)
-```
+```bash
 cd flowfusion; ./prepare.sh
 ```
-and start fuzzing (tmux)
+and start fuzzing on tmux
+```bash
+tmux new-session -s fuzz 'bash'
 ```
-tmux new-session -s fuzz 'bash'; python3 main.py
+```bash
+tmux-shell$ python3 main.py
 ```
 
 * you can use the following command to view bugs:
