@@ -161,7 +161,8 @@ class PHPFuzz:
     # Display runtime logs with current progress
     def runtime_log(self, seconds, rounds):
         bugs_found = len(os.listdir(f"{self.test_root}/bugs/"))
-        print(f"\nTime: {int(seconds)} seconds | Bugs found: {bugs_found} | Tests count: {self.total_count} | Rounds executed: {rounds} | Syntax error rate (please check if too high): {float(self.syntax_error_count)/self.total_count} | Coverage (0% by default, we disable gcovr for better efficiency): {self.coverage:.2%}")
+        print(f"\nTime: {int(seconds)} seconds | Bugs found: {bugs_found} | Tests executed : {self.total_count}\n")
+        # print(f"Rounds executed: {rounds} | Syntax error rate (please check if too high): {float(self.syntax_error_count)/self.total_count} | Coverage (0% by default, we disable gcovr for better efficiency): {self.coverage:.2%}")
 
     # Main function to execute the fuzzing process
     def main(self):
@@ -198,9 +199,9 @@ class PHPFuzz:
 
             # 
             # TODO:
-            # Note: by default 24 parallel fuzzing, however, it is not stable due to run-tests.php :(
+            # Note: by default 16 parallel fuzzing, however, it is not stable due to run-tests.php :(
             #
-            os.system('timeout 30 make TEST_PHP_ARGS=-j24 test 2>/dev/null | grep "FAIL" > /tmp/test.log')
+            os.system('timeout 30 make TEST_PHP_ARGS=-j16 test 2>/dev/null | grep "FAIL" > /tmp/test.log')
             os.system(f"chmod -R 777 {self.test_root} 2>/dev/null")
             os.system("kill -9 `ps aux | grep \"/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/cli/php\" | grep -v grep | awk '{print $2}'` > /dev/null 2>&1")
             os.system("kill -9 `ps aux | grep \"/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/phpdbg/phpdbg\" | grep -v grep | awk '{print $2}'` > /dev/null 2>&1")

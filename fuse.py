@@ -179,58 +179,18 @@ opcache.jit=''' + jit_mode + '\n'
 
     # return function_name, params
     def select_random_function(self):
-        conn = sqlite3.connect(f"{self.test_root}/knowledges/apis.db")
-        cursor = conn.cursor()
-
-        # Select a random function
-        cursor.execute('''
-            SELECT id, name, num_params FROM functions
-            ORDER BY RANDOM()
-            LIMIT 1
-        ''')
-        function = cursor.fetchone()
-
-        if function is None:
-            print("No functions found in the database.")
-            conn.close()
-            return
-
-        function_id, function_name, num_params = function
-
-        # Retrieve parameters for the selected function
-        cursor.execute('''
-            SELECT name, type, is_optional, default_value FROM parameters
-            WHERE function_id = ?
-            ORDER BY id ASC
-        ''', (function_id,))
-        parameters = cursor.fetchall()
-
-        conn.close()
-
-        return function_name, parameters
-
-        # Print function details
-        # print(f"Function: {function_name}")
-        # print(f"Number of parameters: {num_params}")
-        # print("Parameters:")
-        # for param in parameters:
-        #     param_name, param_type, is_optional, default_value = param
-        #     is_optional_str = "Yes" if is_optional else "No"
-        #     print(f"  - Name: {param_name}")
-        #     print(f"    Type: {param_type}")
-        #     print(f"    Is Optional: {is_optional_str}")
-        #     print(f"    Default Value: {default_value}")
-        # print()
+        function_name, param_num = choice(self.apis)
+        return function_name, param_num
 
     # fuzz the api
     # defined_vars: the defined vars in the php program to be the arguments of apis
     def _instrumentation_apifuzz(self, defined_vars):
         _instruments = []
-        func, params = self.select_random_function()
+        func, param_num = self.select_random_function()
         # we try 10 times to randomly fuzz the arguments
         for i in range(10):
             args = []
-            for x in range(len(params)):
+            for x in range(param_num):
                 args.append(choice(defined_vars))
             _instrument = f"{func}({','.join(args)});"
             _instrument = "try {"+_instrument+"} catch (Exception $e) { echo($e); }"
@@ -338,9 +298,9 @@ opcache.jit=''' + jit_mode + '\n'
 
         variables = eval(variable1) + eval(variable2) + ['$fusion']
 
-        # TODO: to optimize the efficiency
-        # currently disabled for better efficiency
-        _pre_class_instrument, _after_class_instrument = "","" #self._instrumentation_classfuzz(variables)
+        # can be disabled for better efficiency
+        # this use non-cached SQL, it might be slow :(
+        _pre_class_instrument, _after_class_instrument = self._instrumentation_classfuzz(variables)
 
         if self.apifuzz:
             _instrument_apifuzz = self._instrumentation_apifuzz(variables)
@@ -378,7 +338,23 @@ opcache.jit=''' + jit_mode + '\n'
             print("No seeds available")
             exit()
 
-    #def load_apis(self):
+    def load_apis(self):
+        conn = sqlite3.connect(f"{self.test_root}/knowledges/apis.db")
+        cursor = conn.cursor()
+
+        # Select a random function
+        SQL = "SELECT name, num_params FROM functions"
+
+        # Fetch all records
+        cursor.execute(SQL)
+        records = cursor.fetchall()
+        conn.close()
+
+        if records:
+            self.apis = records
+        else:
+            print("No APIs available")
+            exit()
 
     def load_seeds(self):
         conn = sqlite3.connect(f"{self.test_root}/knowledges/seeds.db")
@@ -402,6 +378,7 @@ opcache.jit=''' + jit_mode + '\n'
     # Main function to handle the test fusion process
     def main(self):
         self.load_seeds()
+        self.load_apis()
         while True:
             fused_test = self.fuse()
             self.fuse_count += 1
