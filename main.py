@@ -43,7 +43,11 @@ class PHPFuzz:
 
     # PHP may mess up folders
     def backup_initials(self):
-        os.system(f"cp {self.php_root}/run-tests.php {self.test_root}/backup/")
+        # TODO: we need a robust run-tests.php for fuzzing
+        # update 07/01/2025: we just save one working version of run-tests.php
+        # under the backup folder, and restore it everytime before fuzzloop
+        # we dont backup the latest run-tests.php, it may have various updates
+        # os.system(f"cp {self.php_root}/run-tests.php {self.test_root}/backup/")
         os.system(f"cp {self.php_root}/Makefile {self.test_root}/backup/")
         os.system(f"cp {self.php_root}/libtool {self.test_root}/backup/")
 
@@ -123,8 +127,8 @@ class PHPFuzz:
                 if "Parse error" in content:
                     self.syntax_error_count += 1
                 if "leaked in" in content:
-                    # we do not care about leaks for now
-                    continue
+                    # be default, memory leak is ignored
+                   continue
                 if "Sanitizer" in content or "(core dumped)" in content:
                     os.makedirs(f"{self.bug_folder}/{next_log_id}")
                     shutil.move(f"{casepath}.out", f"{self.bug_folder}/{next_log_id}/test.out")
@@ -157,7 +161,7 @@ class PHPFuzz:
     # Display runtime logs with current progress
     def runtime_log(self, seconds, rounds):
         bugs_found = len(os.listdir(f"{self.test_root}/bugs/"))
-        print(f"\nTime: {int(seconds)} seconds | Bugs found: {bugs_found} | Tests count: {self.total_count} | Rounds executed: {rounds} | Syntax error rate: {float(self.syntax_error_count)/self.total_count} | Coverage: {self.coverage:.2%}")
+        print(f"\nTime: {int(seconds)} seconds | Bugs found: {bugs_found} | Tests count: {self.total_count} | Rounds executed: {rounds} | Syntax error rate (please check if too high): {float(self.syntax_error_count)/self.total_count} | Coverage (0% by default, we disable gcovr for better efficiency): {self.coverage:.2%}")
 
     # Main function to execute the fuzzing process
     def main(self):
@@ -176,10 +180,9 @@ class PHPFuzz:
         print("Start flowfusion...")
         while True:
             count += 1
-            if count % 30 == 0:
+            # we often need to clean the folder... :(
+            if count % 10 == 0:
                 self.init_fused_folder()
-                os.system("pkill php")
-                os.system("pkill phpdbg")
             self.clean()
 
             # Run the fusion process in a separate thread
@@ -192,8 +195,15 @@ class PHPFuzz:
             # Run tests and parse logs
             os.chdir(self.php_root)
             os.system(f"mv /tmp/fused*.phpt {self.php_root}/tests/fused/") # load fused tests
-            os.system('timeout 30 make TEST_PHP_ARGS=-j16 test 2>/dev/null | grep "FAIL" > /tmp/test.log')
+
+            # 
+            # TODO:
+            # Note: by default 24 parallel fuzzing, however, it is not stable due to run-tests.php :(
+            #
+            os.system('timeout 30 make TEST_PHP_ARGS=-j24 test 2>/dev/null | grep "FAIL" > /tmp/test.log')
             os.system(f"chmod -R 777 {self.test_root} 2>/dev/null")
+            os.system("kill -9 `ps aux | grep \"/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/cli/php\" | grep -v grep | awk '{print $2}'` > /dev/null 2>&1")
+            os.system("kill -9 `ps aux | grep \"/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/phpdbg/phpdbg\" | grep -v grep | awk '{print $2}'` > /dev/null 2>&1")
             os.chdir(self.test_root)
             self.parse_log()
 
