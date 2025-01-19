@@ -1,60 +1,77 @@
-## FlowFusion --- Dataflow-driven Fuzzer
+## FlowFusion — A Dataflow-Driven Fuzzer
 
-### What is FlowFusion? 
+### What is FlowFusion?
 
-FlowFusion is a fully automated dataflow-driven fuzzing tool that detects various bugs (memory errors, undefined behaviors, assertion failures) in the PHP interpreter. 
+FlowFusion is a fully automated, dataflow-driven fuzzing tool that detects various bugs (e.g., memory errors, undefined behaviors, assertion failures) in the PHP interpreter.
 
-### How does FlowFusion work?
+### How Does FlowFusion Work?
 
-The core idea behing FlowFusion is to leverage **dataflow** as an efficient representation of test cases (.phpt files) maintained by PHP developers, merging two (or more) test cases to produce fused test cases with more complex code semantics. We connect two (or more) test cases via interleaving their dataflows, i.e., bring the code context from one test case to another. This enables interactions among existing test cases, which are mostly the unit tests verifying one single functionality, making fused test cases interesting with merging code semantics.
+The core idea behind FlowFusion is to leverage **dataflow** as an efficient representation of the official `.phpt` test files maintained by PHP developers. FlowFusion merges two (or more) test cases to produce fused test cases with more complex code semantics. It interleaves the dataflows of multiple test cases, thereby combining their code contexts. This approach enables interactions among existing unit tests (which typically verify a single functionality) to create more intricate code paths—leading to more effective bug-finding.
 
-> Why dataflow? Around 96.1% phpt files exhibit sequential control flow, executing without branching. This finding suggests that control flow contributes little to the overall code semantics. Therefore, we recognize that the code semantics of the official test programs can be effectively represented using only dataflow.
+**Why dataflow?**  
+Around 96.1% of `.phpt` files exhibit sequential control flow (i.e., they execute without branching), which means control flow alone contributes little to the overall code semantics. By focusing on dataflow, FlowFusion captures the essential semantics of these test programs.
 
-The search space of FlowFusion is huge, which means it might take months to cover all possible combinations. Reasons for huge search space are three-fold: (i) two random combinations of around 20K test cases can generate 400M test cases, we can combine even more; (ii) the interleaving has randomness, given two test cases, there could be multiple way to connect them; and (iii) FlowFusion also mutates the test case, fuzzes the runtime environment/configuration like JIT.
+**Why effective?**  
+1. With ~20K test cases, pairwise combinations already exceed 400M fused test cases; combining more than two grows this number exponentially. 
+2. The interleaving process itself has randomness, offering multiple ways to connect two test cases.  
+3. FlowFusion applies additional mutations and also fuzzes runtime configurations (e.g., JIT settings).
 
-FlowFusion additionally fuzzes all defined functions and class methods using the code contexts of fused test cases. Available functions, classes, methods are pre-collected and stored in sqlite3 with necessary information like the number of parameters.
+FlowFusion additionally fuzzes all defined functions and class methods in the context of the fused test cases. A SQLite3 database stores information on available functions, classes, methods, and their parameters to guide fuzzing.
 
-FlowFusion will never be out-of-dated if phpt files keep updating. Any new single test can bring thousands of new fused tests.
+Because FlowFusion relies on the official `.phpt` files, as soon as new tests are added, thousands of new fused tests can be generated. **This ensures FlowFusion remains current and continues to reveal new bugs over time**.
 
+---
 
 ### Instructions
 
-Below are instructions to fuzz the latest commit of php-src
+Below are the steps to fuzz the latest commit of `php-src` inside a Docker container.
 
-* start docker, we suggest fuzzing inside docker (user:phpfuzz pwd:phpfuzz)
-```
-docker run --name phpfuzz -dit 0599jiangyc/flowfusion:latest bash
-```
-and goto the docker
-```
-docker exec -it phpfuzz bash
-```
+1. **Start Docker**  
+   ```bash
+   docker run --name phpfuzz -dit 0599jiangyc/flowfusion:latest bash
+   ```
+   - Username: `phpfuzz`
+   - Password: `phpfuzz`
+   
+   Then enter the container:
+   ```bash
+   docker exec -it phpfuzz bash
+   ```
 
-* inside the docker, clone flowfusion in /home/phpfuzz/WorkSpace
-```bash
-git clone https://github.com/php/flowfusion.git
-```
-then (this takes some minutes)
-```bash
-cd flowfusion; ./prepare.sh
-```
-and start fuzzing on tmux
-```bash
-tmux new-session -s fuzz 'bash'
-```
-```bash
-tmux-shell$ python3 main.py
-```
+2. **Clone FlowFusion & Prepare**  
+   Inside the container, clone the FlowFusion repository into `/home/phpfuzz/WorkSpace`:
+   ```bash
+   git clone https://github.com/php/flowfusion.git
+   cd flowfusion
+   ./prepare.sh
+   ```
+   *Note:* The preparation step can take several minutes.
 
-* you can use the following command to view bugs:
-```
-find ./bugs -name "*.out" | xargs grep -E "Sanitizer|Assertion "
-```
+3. **Start Fuzzing**  
+   Use `tmux` to keep the session running in the background:
+   ```bash
+   tmux new-session -s fuzz 'bash'
+   ```
+   Then run FlowFusion:
+   ```bash
+   python3 main.py
+   ```
+
+4. **View Found Bugs**  
+   To check for bugs:
+   ```bash
+   find ./bugs -name "*.out" | xargs grep -E "Sanitizer|Assertion "
+   ```
+
+---
 
 ### Bugs
 
-FlowFusion has found [hundreds of bugs](https://github.com/php/php-src/issues?q=author%3AYuanchengJiang%20) in the PHP interpreter.
+FlowFusion has already discovered [hundreds of bugs](https://github.com/php/php-src/issues?q=author%3AYuanchengJiang%20) in the PHP interpreter.
 
 ### Research Paper
 
-FlowFusion is more detailed explained in its research paper ([Fuzzing the PHP Interpreter via Dataflow Fusion](https://yuanchengjiang.github.io/docs/flowfusion.pdf)).
+For a more detailed explanation, see the research paper:  
+[Fuzzing the PHP Interpreter via Dataflow Fusion](https://yuanchengjiang.github.io/docs/flowfusion.pdf).
+
+---
