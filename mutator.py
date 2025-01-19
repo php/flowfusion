@@ -135,14 +135,14 @@ class Mutator:
     def _mr_string(self, phpcode):
         """
         Randomly mutate string literals with special values like random bytes or special encoding.
-        99.9% of the time, this function will return the original PHP code without changes.
+        99% of the time, this function will return the original PHP code without changes.
         """
-        if random() > 0.001:
+        if random() > 0.01:
             return phpcode
 
         # Regular expression to match single and double-quoted strings
         target_regex = r"'([^'\\]+(\\.[^'\\]*)*)'|\"([^\"\\]+(\\.[^\"\\]*)*)\""
-        replacements = [f"'{chr(randint(0, 255))}'", 'NULL', "''", "'?~K?~U'"]
+        replacements = [f"'{chr(randint(0, 255))}'", 'NULL', "''", "'?~K?~U'", "'test\\0test'"]
 
         # Find all string literals in the PHP code
         victims = re.findall(target_regex, phpcode)
