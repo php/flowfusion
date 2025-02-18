@@ -49,6 +49,10 @@ RUN apt-get update && \
     libsodium-dev \
     libzip-dev \
     libxslt-dev \
+    libwebp-dev \
+    libjpeg-dev \
+    libfreetype-dev \
+    libpq-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
