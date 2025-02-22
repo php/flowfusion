@@ -81,25 +81,23 @@ class PHPFuzz:
 
     # Clean and initialize the fused test folder
     def init_fused_folder(self):
-        if os.path.exists(self.fused):
-            try:
-                os.system(f"rm -rf {self.fused}")
-            except Exception as e:
-                print(f"Cannot remove fused folder: {str(e)}")
+        if not os.path.exists(self.fused):
+            os.system(f"mkdir {self.fused}")
+
+            # Check for dependencies in the phpt_deps folder
+            dependency = f"{self.test_root}/phpt_deps"
+            if not os.path.exists(dependency):
+                print(f"{dependency} not found..")
                 exit(-1)
-        os.system(f"mkdir {self.fused}")
 
-        # Check for dependencies in the phpt_deps folder
-        dependency = f"{self.test_root}/phpt_deps"
-        if not os.path.exists(dependency):
-            print(f"{dependency} not found..")
-            exit(-1)
-
-        # Restore dependencies and initials
-        os.system(f"cp -R {dependency}/* {self.fused}")
-        os.system(f"cp {self.test_root}/backup/run-tests.php {self.php_root}/")
-        os.system(f"cp {self.test_root}/backup/Makefile {self.php_root}/")
-        os.system(f"cp {self.test_root}/backup/libtool {self.php_root}/")
+            # Restore dependencies and initials
+            os.system(f"cp -R {dependency}/* {self.fused}")
+            os.system(f"cp {self.test_root}/backup/run-tests.php {self.php_root}/")
+            os.system(f"cp {self.test_root}/backup/Makefile {self.php_root}/")
+            os.system(f"cp {self.test_root}/backup/libtool {self.php_root}/")
+            os.system(f"cd {self.php_root}/tests/fused/ && find . -type d -empty -exec touch {{}}/.gitkeep \;")
+            os.system(f"cd {self.php_root} && git add ./tests/fused/ && git add -f ./tests/fused/* && git config --global user.email '0599jiangyc@gmail.com' && git config --global user.name 'fuzzsave' && git commit -m 'fuzzsave'")
+            print("fused inited! git status saved!")
 
     # Check if the PHP build exists
     def check_build(self):
@@ -183,7 +181,8 @@ class PHPFuzz:
             count += 1
             # we often need to clean the folder... :(
             if count % 10 == 0:
-                self.init_fused_folder()
+                # clean the test folder
+                os.system(f"cd {self.test_root} && git clean -fd -e php-src -e phpt_deps -e phpt_seeds -e knowledges -e backup -e bugs -e testpaths")
             self.clean()
 
             # Run the fusion process in a separate thread
@@ -194,19 +193,23 @@ class PHPFuzz:
                     fusion_thread.start()
 
             # Run tests and parse logs
-            os.chdir(self.php_root)
             os.system(f"mv /tmp/fused*.phpt {self.php_root}/tests/fused/") # load fused tests
 
-            # 
             # TODO:
             # Note: by default 16 parallel fuzzing, however, it is not stable due to run-tests.php :(
-            #
-            os.system('timeout 30 make TEST_PHP_ARGS=-j16 test 2>/dev/null | grep "FAIL" > /tmp/test.log')
+
+            os.chdir(self.php_root)
+            os.system('timeout 30 make test TEST_PHP_ARGS="-j16 --set-timeout 5 --offline" 2>/dev/null | grep "FAIL" > /tmp/test.log')
+            os.chdir(self.test_root)
             os.system(f"chmod -R 777 {self.test_root} 2>/dev/null")
             os.system("kill -9 `ps aux | grep \"/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/cli/php\" | grep -v grep | awk '{print $2}'` > /dev/null 2>&1")
             os.system("kill -9 `ps aux | grep \"/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/phpdbg/phpdbg\" | grep -v grep | awk '{print $2}'` > /dev/null 2>&1")
-            os.chdir(self.test_root)
             self.parse_log()
+
+            #
+            # clean 
+            os.system(f"cd {self.php_root} && git clean -fd > /dev/null")
+            #
 
             # Collect coverage periodically
             end = time.time()
