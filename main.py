@@ -183,6 +183,9 @@ class PHPFuzz:
             if count % 10 == 0:
                 # clean the test folder
                 os.system(f"cd {self.test_root} && git clean -fd -e php-src -e phpt_deps -e phpt_seeds -e knowledges -e backup -e bugs -e testpaths")
+                os.system(f"cp {self.test_root}/backup/run-tests.php {self.php_root}/")
+                os.system(f"cp {self.test_root}/backup/Makefile {self.php_root}/")
+                os.system(f"cp {self.test_root}/backup/libtool {self.php_root}/")
             self.clean()
 
             # Run the fusion process in a separate thread
