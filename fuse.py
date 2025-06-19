@@ -273,6 +273,11 @@ opcache.jit=''' + jit_mode + '\n'
         with open(filepath, "w") as f:
             f.write(content)
 
+    # Ad-hoc patches for known syntax errors after fusion
+    def adhoc_syntax_patch(self, phpt):
+        phpt = phpt.replace('echo "Done"\n', 'echo "Done";\n')
+        return phpt
+
     # Fuse two test cases while handling different sections
     def fuse(self):
         phpcode1, variable1, dataflow1, description1, configuration1, skipif1, extension1 = self.select_random_seed()
@@ -320,6 +325,8 @@ opcache.jit=''' + jit_mode + '\n'
         fused_test = f"{fused_description}{fused_configurations}{fused_skipif}{fused_extension}{fused_file}{fused_expect}"
 
         fused_test = re.sub("\n+", "\n", fused_test)
+
+        fused_test = self.adhoc_syntax_patch(fused_test)
 
         return fused_test
 

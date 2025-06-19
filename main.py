@@ -27,6 +27,7 @@ class PHPFuzz:
         self.fused = f"{self.php_root}/tests/fused"
         self.mutated = f"{self.php_root}/tests/mutated"
         self.bug_folder = f"{self.test_root}/bugs/"
+        self.fixme_folder = f"{self.test_root}/fixme/"
         self.log_path = "/tmp/test.log"  # Log path for test execution
 
         # Initialize necessary folders and files
@@ -73,6 +74,8 @@ class PHPFuzz:
     def init_bug_folder(self):
         if not os.path.exists(self.bug_folder):
             os.makedirs(self.bug_folder)
+        if not os.path.exists(self.fixme_folder):
+            os.makedirs(self.fixme_folder)
 
     # Check if the target PHP build exists
     def check_target_exist(self):
@@ -112,6 +115,7 @@ class PHPFuzz:
             logs = f.read().strip("\n").split("\n")
 
         next_log_id = len(os.listdir(self.bug_folder)) + 1
+        fixme_log_id = len(os.listdir(self.fixme_folder)) + 1
         for eachlog in logs:
             # we only care failed fusion tests
             if "FAIL" not in eachlog or "tests/fused" not in eachlog:
@@ -135,6 +139,13 @@ class PHPFuzz:
                     shutil.move(f"{casepath}.phpt", f"{self.bug_folder}/{next_log_id}/test.phpt")
                     shutil.move(f"{casepath}.sh", f"{self.bug_folder}/{next_log_id}/test.sh")
                     next_log_id += 1
+                if "Parse error: syntax error" in content and False: # only for debugging
+                    os.makedirs(f"{self.fixme_folder}/{fixme_log_id}")
+                    shutil.move(f"{casepath}.out", f"{self.fixme_folder}/{fixme_log_id}/test.out")
+                    shutil.move(f"{casepath}.php", f"{self.fixme_folder}/{fixme_log_id}/test.php")
+                    shutil.move(f"{casepath}.phpt", f"{self.fixme_folder}/{fixme_log_id}/test.phpt")
+                    shutil.move(f"{casepath}.sh", f"{self.fixme_folder}/{fixme_log_id}/test.sh")
+                    fixme_log_id += 1
 
     # Clean up test artifacts like logs and output files
     def clean(self):
@@ -160,7 +171,8 @@ class PHPFuzz:
     # Display runtime logs with current progress
     def runtime_log(self, seconds, rounds):
         bugs_found = len(os.listdir(f"{self.test_root}/bugs/"))
-        print(f"\ntime: {int(seconds)} seconds | bugs found: {bugs_found} | tests executed : {self.total_count} | throughput: {self.total_count/seconds} tests per second\n")
+        syntax_correct_rate = float((self.total_count-self.syntax_error_count)/self.total_count)
+        print(f"\ntime: {int(seconds)} seconds | bugs found: {bugs_found} | tests executed : {self.total_count} | syntax correct rate: {syntax_correct_rate:.2%} | throughput: {self.total_count/seconds} tests per second\n")
         if self.coverage != 0:
             print(f"line code coverage : {self.coverage:.2%}")
         if self.stopping_test_num>0 and self.total_count > self.stopping_test_num:
@@ -187,7 +199,7 @@ class PHPFuzz:
             # we often need to clean the folder... :(
             if count % 10 == 0:
                 # clean the test folder
-                os.system(f"cd {self.test_root} && git clean -fd -e php-src -e phpt_deps -e phpt_seeds -e knowledges -e backup -e bugs -e testpaths")
+                os.system(f"cd {self.test_root} && git clean -fd -e php-src -e phpt_deps -e phpt_seeds -e knowledges -e backup -e fixme -e bugs -e testpaths")
                 os.system(f"cp {self.test_root}/backup/run-tests.php {self.php_root}/")
                 os.system(f"cp {self.test_root}/backup/Makefile {self.php_root}/")
                 os.system(f"cp {self.test_root}/backup/libtool {self.php_root}/")
@@ -204,10 +216,10 @@ class PHPFuzz:
             os.system(f"mv /tmp/fused*.phpt {self.php_root}/tests/fused/") # load fused tests
 
             # TODO:
-            # Note: by default 16 parallel fuzzing, however, it is not stable due to run-tests.php :(
+            # Note: by default 32 parallel fuzzing, however, it is not stable due to run-tests.php :(
 
             os.chdir(self.php_root)
-            os.system('timeout 30 make test TEST_PHP_ARGS="-j8 --set-timeout 5 --offline" 2>/dev/null | grep "FAIL" > /tmp/test.log')
+            os.system('timeout 30 make test TEST_PHP_ARGS="-j32 --set-timeout 5" 2>/dev/null | grep "FAIL" > /tmp/test.log')
             os.chdir(self.test_root)
             os.system(f"chmod -R 777 {self.test_root} 2>/dev/null")
             os.system("kill -9 `ps aux | grep \"/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/cli/php\" | grep -v grep | awk '{print $2}'` > /dev/null 2>&1")

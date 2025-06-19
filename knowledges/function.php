@@ -65,7 +65,8 @@ function collect_functions($vars) {
          || $function === 'posix_kill'
          || $function === 'posix_setrlimit'
          || $function === 'sapi_windows_generate_ctrl_event'
-         || $function === 'imagegrabscreen'
+	 || $function === 'imagegrabscreen'
+	 || $function === 'zend_delref' # we should exclude zend_delref, see #18242 and #18848
         ) {
             return false;
         }
