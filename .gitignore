@@ -1,0 +1,18 @@
+# built / downloaded by prepare.sh
+php-src/
+php-langspec/
+phpt_deps/
+phpt_seeds/
+knowledges/*.db
+knowledges/*.json
+testpaths
+
+# fuzzing output
+bugs/
+bug_reports/
+workdir/
+logs/
+fused-tests/
+
+__pycache__/
+*.pyc

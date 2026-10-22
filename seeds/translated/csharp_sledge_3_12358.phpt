@@ -1,0 +1,52 @@
+--TEST--
+Translated seed (inferredbugs-csharp: sledge/3)
+--FILE--
+<?php
+$h=fopen('php://temp','r+');
+fwrite($h,"IDST");
+fwrite($h,pack('V',44));
+fwrite($h,pack('V',0));
+fwrite($h,str_pad("mdl",64,"\0"));
+fwrite($h,pack('V',0));
+fwrite($h,pack('g',0).pack('g',0).pack('g',0));
+fwrite($h,pack('g',0).pack('g',0).pack('g',0));
+fwrite($h,pack('g',0).pack('g',0).pack('g',0));
+fwrite($h,pack('g',0).pack('g',0).pack('g',0));
+for($i=0;$i<18;$i++) fwrite($h,pack('V',0));
+rewind($h);
+$magic=fread($h,4);
+$version=unpack('V',fread($h,4))[1];
+$checksum=unpack('V',fread($h,4))[1];
+$name=rtrim(fread($h,64),"\0");
+$fileSize=unpack('V',fread($h,4))[1];
+$eye=unpack('g3',fread($h,12));
+$illum=unpack('g3',fread($h,12));
+$hullMin=unpack('g3',fread($h,12));
+$hullMax=unpack('g3',fread($h,12));
+$bbMin=unpack('g3',fread($h,12));
+$bbMax=unpack('g3',fread($h,12));
+$flags=unpack('V',fread($h,4))[1];
+$numBones=unpack('V',fread($h,4))[1];
+$boneIndex=unpack('V',fread($h,4))[1];
+$numBoneControllers=unpack('V',fread($h,4))[1];
+$boneControllerIndex=unpack('V',fread($h,4))[1];
+$numHitBoxes=unpack('V',fread($h,4))[1];
+$hitboxIndex=unpack('V',fread($h,4))[1];
+$numAnim=unpack('V',fread($h,4))[1];
+$animIndex=unpack('V',fread($h,4))[1];
+$numSeq=unpack('V',fread($h,4))[1];
+$seqIndex=unpack('V',fread($h,4))[1];
+$activitylistversion=unpack('V',fread($h,4))[1];
+$eventsindexed=unpack('V',fread($h,4))[1];
+$numTextures=unpack('V',fread($h,4))[1];
+$textureIndex=unpack('V',fread($h,4))[1];
+$numSkinRef=unpack('V',fread($h,4))[1];
+$numSkinFamilies=unpack('V',fread($h,4))[1];
+$skinIndex=unpack('V',fread($h,4))[1];
+$numBodyParts=unpack('V',fread($h,4))[1];
+$bodyPartIndex=unpack('V',fread($h,4))[1];
+$numAttachments=unpack('V',fread($h,4))[1];
+$attachmentIndex=unpack('V',fread($h,4))[1];
+for($i=0;$i<18;$i++) fread($h,4);
+echo "ok\n";
+--EXPECT--

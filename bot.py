@@ -12,7 +12,7 @@ from reduce import reduce_php
 def handler(signum, frame):
     raise Exception("end of time")
 
-test_root = "/home/phpfuzz/WorkSpace/flowfusion"
+test_root = os.path.dirname(os.path.abspath(__file__))
 
 plain_text_bug_report = """
 ================
@@ -53,7 +53,7 @@ PHP Bug Report
 # copy dependencies for reproducing
 if os.path.exists("/tmp/flowfusion_reproducing/")==False:
     os.mkdir("/tmp/flowfusion_reproducing/")
-os.system(f"cp -R {test_root}/phpt_deps/* /tmp/flowfusion_reproducing/")
+# each bug bundle carries the fixtures its test used (copied per bug below)
 
 # Change directory to the "bugs" folder
 os.chdir(f"{test_root}/bugs")
@@ -194,7 +194,7 @@ for bug in data:
 
     bug_outputs = ["UndefinedBehaviorSanitizer: undefined-behavior", "AddressSanitizer", "core dumped"]
     # get reducedphp
-    os.system(f"cp {bug_folder}/test.php /tmp/flowfusion_reproducing/")
+    os.system(f"cp -R {bug_folder}/. /tmp/flowfusion_reproducing/")
     bug_output = ""
     for each in bug_outputs:
         if each in bugout:

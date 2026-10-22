@@ -1,244 +1,156 @@
+#!/usr/bin/env python3
+"""
+FlowFusion — fuzz the PHP interpreter by fusing its own test programs.
+
+    python3 main.py                                  # fuzz with all strategies
+    python3 main.py --strategies state --time-limit 2h
+    python3 main.py --generate 20 --out /tmp/fused   # only write fused tests
+
+Run ./prepare.sh once before fuzzing (php-src build, seeds, knowledge).
+"""
+
+import argparse
 import os
-import glob
-import time
-import datetime
-import shutil
-import threading
-from fuse import Fusion
-from mutator import Mutator
+import random
+import re
+import sys
 
-# Class for handling PHP fuzzing process
-class PHPFuzz:
+from flowfusion.config import Config
+from flowfusion.fusion import STRATEGIES
 
-    def __init__(self):
-        """
-        Initialize the PHPFuzz class with various configurations and settings.
-        """
-        # Configurations for different fuzzing features
-        self.mutation = True
-        self.apifuzz = True
-        self.ini = True
-        self.fusion = True
 
-        # Coverage feedback (off by default due to overhead)
-        self.coverage = False
-        self.test_root = "/home/phpfuzz/WorkSpace/flowfusion"
-        self.php_root = f"{self.test_root}/php-src"
-        self.fused = f"{self.php_root}/tests/fused"
-        self.mutated = f"{self.php_root}/tests/mutated"
-        self.bug_folder = f"{self.test_root}/bugs/"
-        self.fixme_folder = f"{self.test_root}/fixme/"
-        self.log_path = "/tmp/test.log"  # Log path for test execution
+def duration(text: str) -> int:
+    m = re.fullmatch(r'(\d+)\s*([smhd]?)', text.strip())
+    if not m:
+        raise argparse.ArgumentTypeError(f"bad duration {text!r} (use e.g. 90, 30m, 2h, 1d)")
+    return int(m.group(1)) * {'': 1, 's': 1, 'm': 60, 'h': 3600, 'd': 86400}[m.group(2)]
 
-        # Initialize necessary folders and files
-        self.patch_run_test()
-        self.backup_initials()
-        self.check_target_exist()
-        self.init_fused_folder()
-        self.init_bug_folder()
-        self.init_phpt_path()
-        self.moveout_builtin_phpts()
 
-        self.total_count = 1
-        self.syntax_error_count = 0 
-        self.stopping_test_num = -1 # stop the fuzzer after executing this number of test cases, -1 means infinite     
+def strategy_list(text: str):
+    names = [n.strip() for n in text.split(',') if n.strip()]
+    bad = [n for n in names if n not in STRATEGIES]
+    if bad or not names:
+        raise argparse.ArgumentTypeError(f"unknown strategy {bad or text!r}; choose from {', '.join(STRATEGIES)}")
+    return tuple(dict.fromkeys(names))
 
-    # PHP may mess up folders
-    def backup_initials(self):
-        # TODO: we need a robust run-tests.php for fuzzing
-        # update 07/01/2025: we just save one working version of run-tests.php
-        # under the backup folder, and restore it everytime before fuzzloop
-        # we dont backup the latest run-tests.php, it may have various updates
-        # os.system(f"cp {self.php_root}/run-tests.php {self.test_root}/backup/")
-        os.system(f"cp {self.php_root}/Makefile {self.test_root}/backup/")
-        os.system(f"cp {self.php_root}/libtool {self.test_root}/backup/")
 
-    # Patch the run-tests.php script to avoid conflicts
-    def patch_run_test(self):
-        os.chdir(self.php_root)
-        os.system("sed -i 's/foreach (\$fileConflictsWith\[\$file\] as \$conflictKey) {/foreach (\$fileConflictsWith\[\$file\] as \$conflictKey) { continue;/g' ./run-tests.php")
-        os.system("sed -i 's/proc_terminate(\$workerProcs\[\$i\]);/\/\/proc_terminate(\$workerProcs\[\$i\]);/' ./run-tests.php")
-        os.system("sed -i 's/unset(\$workerProcs\[\$i\], \$workerSocks\[\$i\]);/\/\/unset(\$workerProcs\[\$i\], \$workerSocks\[\$i\]);/' ./run-tests.php")
-        os.system("sed -i 's/foreach (\$test_files as \$i => \$file) {/foreach (\$test_files as \$i => \$file) { continue;/' ./run-tests.php")
-        os.chdir(self.test_root)
+def build_parser() -> argparse.ArgumentParser:
+    d = Config()
+    p = argparse.ArgumentParser(description="FlowFusion: fusion-based fuzzer for the PHP interpreter",
+                                formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    g = p.add_argument_group("fusion")
+    g.add_argument("--strategies", type=strategy_list, default=d.strategies,
+                   help="comma-separated fusion strategies: " + ", ".join(STRATEGIES))
+    g.add_argument("--weights", default="",
+                   help="relative strategy weights, e.g. dataflow=2,state=1")
+    g.add_argument("--chain-rate", type=float, default=d.chain_rate,
+                   help="probability of fusing the child with a third seed")
+    g.add_argument("--no-mutation", action="store_true", help="do not mutate seeds")
+    g.add_argument("--no-apifuzz", action="store_true", help="do not append internal-function calls")
+    g.add_argument("--apifuzz-rate", type=float, default=d.apifuzz_rate)
+    g.add_argument("--no-classfuzz", action="store_true", help="do not instantiate internal classes")
+    g.add_argument("--classfuzz-rate", type=float, default=d.classfuzz_rate)
+    g.add_argument("--no-ini", action="store_true", help="do not fuzz INI settings / JIT modes")
+    g.add_argument("--jit-rate", type=float, default=d.jit_rate, help="share of tests run with the JIT")
+    g.add_argument("--translated-weight", type=float, default=d.translated_weight,
+                   help="selection weight of translated seeds relative to php-src seeds")
 
-    # Remove built-in PHPT files to avoid conflicts
-    def moveout_builtin_phpts(self):
-        os.system(f"find {self.php_root} -name '*.phpt' | xargs rm 2>/dev/null")
+    g = p.add_argument_group("execution")
+    g.add_argument("-j", "--jobs", type=int, default=d.jobs, help="parallel test processes (default: 1.5 x CPUs)")
+    g.add_argument("--runners", type=int, default=0,
+                   help="concurrent run-tests.php instances, jobs are split between them (default: jobs / 3)")
+    g.add_argument("--batch-size", type=int, default=0, help="tests per batch (default: 24 x jobs per runner)")
+    g.add_argument("--timeout", type=int, default=d.timeout, help="seconds per test")
+    g.add_argument("--zendmm-ratio", type=float, default=d.zendmm_ratio,
+                   help="share of batches run with the Zend allocator instead of ASan-visible malloc")
+    g.add_argument("--leaks", action="store_true", help="report memory leaks as bugs")
+    g.add_argument("--max-dups", type=int, default=d.max_dups, help="reproducers kept per bug signature")
+    g.add_argument("--keep-batches", action="store_true", help="keep executed batch directories (debugging)")
 
-    # Initialize the path to PHPT files
-    def init_phpt_path(self):
-        os.system(f'find {self.test_root}/phpt_seeds/ -name "*.phpt" > {self.test_root}/testpaths')
+    g = p.add_argument_group("stopping")
+    g.add_argument("--max-tests", type=int, default=0, help="stop after this many tests")
+    g.add_argument("--time-limit", type=duration, default=0, help="stop after this long (e.g. 30m, 12h)")
 
-    # Create the bug folder if it doesn't exist
-    def init_bug_folder(self):
-        if not os.path.exists(self.bug_folder):
-            os.makedirs(self.bug_folder)
-        if not os.path.exists(self.fixme_folder):
-            os.makedirs(self.fixme_folder)
+    g = p.add_argument_group("paths")
+    g.add_argument("--php-src", default=str(d.php_src), help="php-src checkout with a built sapi/cli/php")
+    g.add_argument("--php", default=None, help="PHP binary to fuzz (default: <php-src>/sapi/cli/php)")
+    g.add_argument("--harness-php", default=None,
+                   help="PHP that runs run-tests.php (default: a non-sanitized php on PATH, else the target)")
+    g.add_argument("--seeds-db", default=str(d.seeds_db))
+    g.add_argument("--bugs-dir", default=str(d.bugs_dir))
+    g.add_argument("--work-dir", default=str(d.work_dir),
+                   help="scratch space for batches (a tmpfs such as /dev/shm/flowfusion is faster)")
 
-    # Check if the target PHP build exists
-    def check_target_exist(self):
-        if not os.path.exists(self.php_root):
-            print(f"{self.php_root} not found..")
-            exit(-1)
+    g = p.add_argument_group("other")
+    g.add_argument("--ui", choices=("auto", "dash", "plain"), default="auto",
+                   help="dash: live full-screen dashboard; plain: log lines (default when not a TTY)")
+    g.add_argument("--seed", type=int, default=None, help="random seed")
+    g.add_argument("--generate", type=int, default=0, metavar="N",
+                   help="only write N fused tests (with fixtures) to --out and exit")
+    g.add_argument("--out", default="fused-tests", help="output directory for --generate")
+    return p
 
-    # Clean and initialize the fused test folder
-    def init_fused_folder(self):
-        if not os.path.exists(self.fused):
-            os.system(f"mkdir {self.fused}")
 
-            # Check for dependencies in the phpt_deps folder
-            dependency = f"{self.test_root}/phpt_deps"
-            if not os.path.exists(dependency):
-                print(f"{dependency} not found..")
-                exit(-1)
+def config_from_args(args) -> Config:
+    weights = {}
+    for item in filter(None, (s.strip() for s in args.weights.split(','))):
+        name, _, w = item.partition('=')
+        weights[name.strip()] = float(w or 1)
+    return Config(
+        php_src=args.php_src, php_bin=args.php, harness_php=args.harness_php,
+        seeds_db=args.seeds_db, bugs_dir=args.bugs_dir, work_dir=args.work_dir,
+        strategies=args.strategies, strategy_weights=weights, chain_rate=args.chain_rate,
+        mutation=not args.no_mutation, apifuzz=not args.no_apifuzz, apifuzz_rate=args.apifuzz_rate,
+        classfuzz=not args.no_classfuzz, classfuzz_rate=args.classfuzz_rate,
+        ini=not args.no_ini, jit_rate=args.jit_rate, translated_weight=args.translated_weight,
+        jobs=args.jobs, runners=args.runners, batch_size=args.batch_size, timeout=args.timeout,
+        zendmm_ratio=args.zendmm_ratio, leaks=args.leaks, max_dups=args.max_dups,
+        keep_batches=args.keep_batches, max_tests=args.max_tests, time_limit=args.time_limit,
+        ui=args.ui, rng_seed=args.seed,
+    )
 
-            # Restore dependencies and initials
-            os.system(f"cp -R {dependency}/* {self.fused}")
-            os.system(f"cp {self.test_root}/backup/run-tests.php {self.php_root}/")
-            os.system(f"cp {self.test_root}/backup/Makefile {self.php_root}/")
-            os.system(f"cp {self.test_root}/backup/libtool {self.php_root}/")
-            os.system(f"cd {self.php_root}/tests/fused/ && find . -type d -empty -exec touch {{}}/.gitkeep \;")
-            os.system(f"cd {self.php_root} && git add ./tests/fused/ && git add -f ./tests/fused/* && git config --global user.email '0599jiangyc@gmail.com' && git config --global user.name 'fuzzsave' && git commit -m 'fuzzsave'")
-            print("fused inited! git status saved!")
 
-    # Check if the PHP build exists
-    def check_build(self):
-        return os.path.exists(f"{self.php_root}/sapi/cli/php")
+def generate_only(cfg: Config, count: int, out_dir: str) -> int:
+    from flowfusion.corpus import SeedPool, load_seeds, without_missing_extensions
+    from flowfusion.harness import loaded_extensions
+    from flowfusion.fusion import Fuser
+    from flowfusion.generator import TestGenerator
+    from flowfusion.knowledge import Knowledge
+    from flowfusion.mutator import Mutator
 
-    # Parse the test log for failed tests and possible bugs
-    def parse_log(self):
-        known_crash_sites = ["leak"]
+    cfg.finalize()
+    if not os.path.exists(cfg.seeds_db):
+        print(f"seed database not found: {cfg.seeds_db} (run ./prepare.sh first)", file=sys.stderr)
+        return 1
+    rng = random.Random(cfg.rng_seed)
+    seeds = load_seeds(str(cfg.seeds_db))
+    if cfg.php_bin.exists():
+        seeds, _ = without_missing_extensions(seeds, loaded_extensions(str(cfg.php_bin)))
+    pool = SeedPool(seeds, rng=rng, translated_weight=cfg.translated_weight)
+    fuser = Fuser(list(cfg.strategies), rng=rng, mutator=Mutator(rng=rng) if cfg.mutation else None,
+                  chain_rate=cfg.chain_rate, weights=cfg.strategy_weights)
+    gen = TestGenerator(cfg, pool, fuser, Knowledge(str(cfg.apis_db), str(cfg.class_db), rng=rng), rng=rng)
+    os.makedirs(out_dir, exist_ok=True)
+    batch = gen.make_batch(0, count, out_dir)
+    for t in batch.tests:
+        print(f"{t.phpt}\t{t.strategy}\t{t.mode}\t{t.exec_mode}\t{' + '.join(t.parents)}")
+    if getattr(gen, "errors", 0):
+        print(f"{gen.errors} fusion errors; last: {gen.last_error}", file=sys.stderr)
+    return 0
 
-        with open(self.log_path, "r") as f:
-            logs = f.read().strip("\n").split("\n")
 
-        next_log_id = len(os.listdir(self.bug_folder)) + 1
-        fixme_log_id = len(os.listdir(self.fixme_folder)) + 1
-        for eachlog in logs:
-            # we only care failed fusion tests
-            if "FAIL" not in eachlog or "tests/fused" not in eachlog:
-                continue
-            casepath = self.php_root + "/" + eachlog.split("[")[-1].split("]")[0].replace(".phpt", "")
-            stdouterr = f"{casepath}.out"
-            if not os.path.exists(stdouterr):
-                continue
-            with open(stdouterr, "r", encoding="iso_8859_1") as f:
-                content = f.read()
-                self.total_count += 1
-                if "Parse error" in content:
-                    self.syntax_error_count += 1
-                if "leaked in" in content:
-                    # be default, memory leak is ignored
-                   continue
-                if "Sanitizer" in content or "(core dumped)" in content:
-                    os.makedirs(f"{self.bug_folder}/{next_log_id}")
-                    shutil.move(f"{casepath}.out", f"{self.bug_folder}/{next_log_id}/test.out")
-                    shutil.move(f"{casepath}.php", f"{self.bug_folder}/{next_log_id}/test.php")
-                    shutil.move(f"{casepath}.phpt", f"{self.bug_folder}/{next_log_id}/test.phpt")
-                    shutil.move(f"{casepath}.sh", f"{self.bug_folder}/{next_log_id}/test.sh")
-                    next_log_id += 1
-                if "Parse error: syntax error" in content and False: # only for debugging
-                    os.makedirs(f"{self.fixme_folder}/{fixme_log_id}")
-                    shutil.move(f"{casepath}.out", f"{self.fixme_folder}/{fixme_log_id}/test.out")
-                    shutil.move(f"{casepath}.php", f"{self.fixme_folder}/{fixme_log_id}/test.php")
-                    shutil.move(f"{casepath}.phpt", f"{self.fixme_folder}/{fixme_log_id}/test.phpt")
-                    shutil.move(f"{casepath}.sh", f"{self.fixme_folder}/{fixme_log_id}/test.sh")
-                    fixme_log_id += 1
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    cfg = config_from_args(args)
+    if args.generate:
+        return generate_only(cfg, args.generate, args.out)
+    from flowfusion.fuzzer import Fuzzer, FuzzError
+    try:
+        return Fuzzer(cfg).run()
+    except FuzzError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
 
-    # Clean up test artifacts like logs and output files
-    def clean(self):
-        os.system(f"find {self.fused} -type f -name '*.log' -o -name '*.out' -o -name '*.diff' -o -name '*.sh' -o -name '*.php' -o -name '*.phpt' | xargs rm 2>/dev/null")
 
-    # Collect coverage information at regular intervals
-    def collect_cov(self, fuzztime):
-        def run_coverage_collection():
-            #os.system("python3 bot.py")
-            os.chdir(self.php_root)
-            cmd = f"gcovr -sr . -o /tmp/gcovr-{fuzztime}.xml --xml --exclude-directories 'ext/date/lib$$' -e 'ext/bcmath/libbcmath/.*' -e 'ext/date/lib/.*' -e 'ext/fileinfo/libmagic/.*' -e 'ext/gd/libgd/.*' -e 'ext/hash/sha3/.*' -e 'ext/mbstring/libmbfl/.*' -e 'ext/pcre/pcre2lib/.*' > /dev/null"
-            os.system(cmd)
-            os.chdir(self.test_root)
-            with open(f"/tmp/gcovr-{fuzztime}.xml", "r") as f:
-                x = f.read()
-            self.coverage = float(x.split('line-rate="')[1].split('"')[0])
-            print(f"Coverage: {self.coverage:.2%}")
-
-        # Create a new thread for running coverage collection
-        coverage_thread = threading.Thread(target=run_coverage_collection)
-        coverage_thread.start()
-
-    # Display runtime logs with current progress
-    def runtime_log(self, seconds, rounds):
-        bugs_found = len(os.listdir(f"{self.test_root}/bugs/"))
-        syntax_correct_rate = float((self.total_count-self.syntax_error_count)/self.total_count)
-        print(f"\ntime: {int(seconds)} seconds | bugs found: {bugs_found} | tests executed : {self.total_count} | syntax correct rate: {syntax_correct_rate:.2%} | throughput: {self.total_count/seconds} tests per second\n")
-        if self.coverage != 0:
-            print(f"line code coverage : {self.coverage:.2%}")
-        if self.stopping_test_num>0 and self.total_count > self.stopping_test_num:
-            print("stopped")
-            exit(0)
-
-    # Main function to execute the fuzzing process
-    def main(self):
-        if not self.check_build():
-            print("php not build")
-            exit()
-
-        count = 0
-        start = time.time()
-        covtime = 60*60  # Interval for counting coverage (in seconds)
-        fuzztime = 0
-        self.coverage = 0
-
-        fusion_thread = None
-
-        print("Start flowfusion...")
-        while True:
-            count += 1
-            # we often need to clean the folder... :(
-            if count % 10 == 0:
-                # clean the test folder
-                os.system(f"cd {self.test_root} && git clean -fd -e php-src -e phpt_deps -e phpt_seeds -e knowledges -e backup -e fixme -e bugs -e testpaths")
-                os.system(f"cp {self.test_root}/backup/run-tests.php {self.php_root}/")
-                os.system(f"cp {self.test_root}/backup/Makefile {self.php_root}/")
-                os.system(f"cp {self.test_root}/backup/libtool {self.php_root}/")
-            self.clean()
-
-            # Run the fusion process in a separate thread
-            if self.fusion:
-                if fusion_thread is None or not fusion_thread.is_alive():
-                    phpFusion = Fusion(self.test_root, self.php_root, self.apifuzz, self.ini, self.mutation)
-                    fusion_thread = threading.Thread(target=phpFusion.main)
-                    fusion_thread.start()
-
-            # Run tests and parse logs
-            os.system(f"mv /tmp/fused*.phpt {self.php_root}/tests/fused/") # load fused tests
-
-            # TODO:
-            # Note: by default 32 parallel fuzzing, however, it is not stable due to run-tests.php :(
-
-            os.chdir(self.php_root)
-            os.system('timeout 30 make test TEST_PHP_ARGS="-j32 --set-timeout 5" 2>/dev/null | grep "FAIL" > /tmp/test.log')
-            os.chdir(self.test_root)
-            os.system(f"chmod -R 777 {self.test_root} 2>/dev/null")
-            os.system("kill -9 `ps aux | grep \"/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/cli/php\" | grep -v grep | awk '{print $2}'` > /dev/null 2>&1")
-            os.system("kill -9 `ps aux | grep \"/home/phpfuzz/WorkSpace/flowfusion/php-src/sapi/phpdbg/phpdbg\" | grep -v grep | awk '{print $2}'` > /dev/null 2>&1")
-            self.parse_log()
-
-            # clean 
-            os.system(f"cd {self.php_root} && git clean -fd > /dev/null")
-
-            # Collect coverage periodically
-            end = time.time()
-            timelen = end - start
-            if timelen > covtime + fuzztime:
-                fuzztime += covtime
-                self.collect_cov(fuzztime)
-
-            # Log runtime information
-            self.runtime_log(timelen, count)
-
-# Initialize and run the fuzzing process
-fuzz = PHPFuzz()
-fuzz.main()
+if __name__ == "__main__":
+    sys.exit(main())
