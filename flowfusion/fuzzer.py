@@ -153,7 +153,12 @@ class Fuzzer:
                 self.stats.batch_done(batch.bid, [])
             finally:
                 if not self.cfg.keep_batches:
-                    remove_tree(batch.dir)
+                    try:
+                        remove_tree(batch.dir)
+                    except Exception as e:
+                        # never let cleanup end the thread: each dead runner
+                        # silently takes 1/runners of the throughput with it
+                        self.stats.event(f"runner {idx} cleanup error: {type(e).__name__}: {e}")
 
     def _triage(self, batch, results):
         outcomes = []

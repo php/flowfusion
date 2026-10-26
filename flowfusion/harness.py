@@ -302,12 +302,28 @@ def _read_bounded(path: str) -> str:
 
 
 def remove_tree(path: str):
-    """rmtree that survives tests which chmod'ed their own files/dirs."""
-    def onerror(func, p, _exc):
+    """rmtree that survives tests which chmod'ed their own files/dirs, and
+    never raises: it runs in the runners' cleanup path, where an exception
+    would kill the runner thread (and so permanently lower throughput).
+
+    Retrying the failed call from rmtree's onerror hook does not work: for
+    an unreadable directory the failed call is os.open(), which needs flags
+    (TypeError), and a 0000 subdirectory is never descended into anyway. So
+    on failure make every directory accessible first, then remove again."""
+    try:
+        shutil.rmtree(path)
+        return
+    except FileNotFoundError:
+        return
+    except OSError:
+        pass
+    stack = [path]
+    while stack:
+        d = stack.pop()
         try:
-            os.chmod(os.path.dirname(p), 0o755)
-            os.chmod(p, 0o755)
-            func(p)
+            os.chmod(d, 0o700)
+            with os.scandir(d) as it:
+                stack.extend(e.path for e in it if e.is_dir(follow_symlinks=False))
         except OSError:
-            pass
-    shutil.rmtree(path, onerror=onerror)
+            continue
+    shutil.rmtree(path, ignore_errors=True)

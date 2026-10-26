@@ -3,7 +3,9 @@
     python3 -m unittest discover -s tests
 """
 
+import os
 import random
+import tempfile
 import time
 import unittest
 
@@ -11,6 +13,7 @@ from flowfusion import phplex, state
 from flowfusion.corpus import Seed, dataflow_groups, parse_phpt, without_missing_extensions
 from flowfusion.fusion import DataflowFusion, DeclarationFusion, Fuser, StateFusion
 from flowfusion.generator import TestGenerator
+from flowfusion.harness import remove_tree
 from flowfusion.config import Config
 from flowfusion.knowledge import sanitize_ini
 from flowfusion.mutator import Mutator
@@ -200,6 +203,29 @@ class TriageTest(unittest.TestCase):
             t = time.time()
             classify(text, "FAILED")
             self.assertLess(time.time() - t, 2.0)
+
+
+class RemoveTreeTest(unittest.TestCase):
+    def test_removes_chmodded_dirs_without_raising(self):
+        # ext/standard/tests/dir/*_variation* chmod 0000 their directories;
+        # cleaning up such a batch used to raise TypeError and kill a runner
+        root = tempfile.mkdtemp()
+        batch = os.path.join(root, "b000001")
+        child = os.path.join(batch, "t0000", "dir", "sub", "child")
+        os.makedirs(child)
+        open(os.path.join(child, "f"), "w").close()
+        for d in (child, os.path.dirname(child), batch):
+            os.chmod(d, 0)
+        try:
+            remove_tree(batch)
+            remove_tree(batch)          # already gone: no error either
+            self.assertFalse(os.path.exists(batch))
+        finally:
+            for dirpath, dirnames, _ in os.walk(root):
+                for d in dirnames:
+                    os.chmod(os.path.join(dirpath, d), 0o700)
+            os.chmod(root, 0o700)
+            remove_tree(root)
 
 
 if __name__ == "__main__":
