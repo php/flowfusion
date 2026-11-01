@@ -9,6 +9,11 @@ This module calls run-tests.php directly instead:
 - tests live in a scratch batch directory, never inside php-src; the test
   processes' cwd (TEST_PHP_SRCDIR) is a scratch directory too, so files a
   test writes are removed with the batch;
+- so is their temp directory (TMPDIR, sys_temp_dir, the SOAP WSDL cache):
+  sys_get_temp_dir(), tempnam(), tmpfile(), session and WSDL cache files
+  otherwise pile up in /tmp, since a fused test has no --CLEAN-- and many
+  tests crash or time out anyway. Only seeds that hardcode '/tmp/...' still
+  write there (rewriting those would break the saved reproducers);
 - run-tests.php is executed by a non-sanitized PHP when one is available.
   The ASan/debug build as the *harness* interpreter is slow, and its
   stream_select() fails with EINTR so the per-test timeout never fires
@@ -189,9 +194,11 @@ class Harness:
             "symbolize=1",
             "disable_coredump=1",
         ]
+        tmp = os.path.join(batch.dir, "tmp")
         env.update({
             "NO_INTERACTION": "1",
             "TEST_PHP_SRCDIR": os.path.join(batch.dir, "cwd"),
+            "TMPDIR": tmp, "TMP": tmp, "TEMP": tmp,
             "ASAN_OPTIONS": ":".join(asan),
             "UBSAN_OPTIONS": "print_stacktrace=1",
             "SKIP_ONLINE_TESTS": "1",
@@ -209,10 +216,16 @@ class Harness:
         # run-tests.php triples the timeout under --asan; undo that so
         # --timeout means wall-clock seconds per test either way.
         per_test = max(1, math.ceil(self.cfg.timeout / (3 if batch.asan else 1)))
+        tmp = os.path.join(batch.dir, "tmp")
         cmd = [self.runner, "-n", self.run_tests, "-p", self.php,
                "-q", "--no-color", "--no-progress", f"-j{max(1, jobs)}",
                "--set-timeout", str(per_test),
                "-W", os.path.join(batch.dir, "status.txt"),
+               "-d", "sys_temp_dir=" + tmp,
+               # these two default to "/tmp" rather than to sys_temp_dir; the
+               # WSDL cache is keyed by the WSDL's path, so with a fresh batch
+               # directory every time it would grow without bound
+               "-d", "soap.wsdl_cache_dir=" + tmp, "-d", "opcache.lockfile_path=" + tmp,
                "-d", "disable_functions=" + ",".join(BLOCKED_FUNCTIONS)]
         if batch.asan:
             cmd.append("--asan")
@@ -224,6 +237,7 @@ class Harness:
 
     def run(self, batch: Batch, jobs: int) -> List[TestResult]:
         os.makedirs(os.path.join(batch.dir, "cwd"), exist_ok=True)
+        os.makedirs(os.path.join(batch.dir, "tmp"), exist_ok=True)
         log = open(os.path.join(batch.dir, "harness.log"), "wb")
         proc = subprocess.Popen(self.command(batch, jobs), cwd=batch.dir, env=self.environment(batch),
                                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,

@@ -84,6 +84,7 @@ class Fuzzer:
         self.generator = TestGenerator(cfg, self.pool, fuser, knowledge, rng=self.rng)
         self.harness = Harness(cfg)
         self.bugs = BugStore(str(cfg.bugs_dir), max_dups=cfg.max_dups)
+        self._remove_stale_runs()
         self.run_dir = os.path.join(str(cfg.work_dir), f"run-{os.getpid()}")
         os.makedirs(self.run_dir, exist_ok=True)
         os.makedirs(cfg.log_dir, exist_ok=True)
@@ -107,6 +108,30 @@ class Fuzzer:
         info["unique_bugs"] = self.bugs.unique()
         self.stats.event(f"loaded {len(seeds):,} seeds ({dropped:,} dropped: extension not in this build); "
                          f"{self.bugs.unique()} bug signatures known from earlier runs")
+
+    def _remove_stale_runs(self):
+        """Batch directories of runs that were killed (SIGKILL, a container
+        restart) are never cleaned up by their own run. In a container pids
+        restart from 1, so a stale run-<pid> may even carry this run's pid,
+        and its batch directories would then collide with new ones."""
+        try:
+            names = os.listdir(str(self.cfg.work_dir))
+        except OSError:
+            return
+        for name in names:
+            m = re.fullmatch(r"run-(\d+)", name)
+            if not m:
+                continue
+            pid = int(m.group(1))
+            if pid != os.getpid():
+                try:
+                    os.kill(pid, 0)
+                    continue                # that run is still going
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    continue
+            remove_tree(os.path.join(str(self.cfg.work_dir), name))
 
     # -- threads ----------------------------------------------------------
 
