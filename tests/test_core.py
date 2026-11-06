@@ -52,6 +52,14 @@ class LexTest(unittest.TestCase):
         self.assertNotIn('Done', rest)
         self.assertNotIn('?>', rest)
 
+    def test_clean_drops_labels_but_keeps_default_and_else(self):
+        code = phplex.clean_php_code(
+            "<?php\nswitch ($x) {\n    case 1:\n        break;\n    default:\n        echo 2;\n}\n"
+            "if ($a):\n    echo 1;\nElse:\n    echo 2;\nendif;\nend:\n")
+        self.assertIn("    default:\n", code)
+        self.assertIn("\nElse:\n", code)
+        self.assertNotIn("end:", code)
+
     def test_statements_keep_blocks_and_heredocs(self):
         stmts = phplex.split_statements(phplex.clean_php_code(PROGRAM))
         self.assertTrue(any(s.startswith('if (') and 'else' in s for s in stmts))

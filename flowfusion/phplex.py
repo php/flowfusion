@@ -345,7 +345,8 @@ def resolve_name_conflicts(host: str, donor: str) -> str:
 _PREAMBLE_RE = re.compile(r'^\s*(?:declare\s*\([^)]*\)\s*;|namespace\s+[\w\\]+\s*;)\s*(?:(?://|#(?!\[)).*)?$')
 
 _GOTO_RE = re.compile(r'^\s*goto\s+\w+\s*;.*$', re.M)
-_LABEL_RE = re.compile(r'^\s*\w+\s*:\s*$', re.M)
+# `default:` and the alternative-syntax `else:` look like labels but are not.
+_LABEL_RE = re.compile(r'^\s*(?!(?i:default|else)\s*:)\w+\s*:\s*$', re.M)
 _REOPEN_RE = re.compile(r'<\?(?:php\b|=|(?![a-zA-Z]))')
 _DONE_MARKER_RE = re.compile(r'(?:^|\n)[ \t]*(?:===DONE===|==DONE==|===Done===|Done)[ \t]*$')
 
